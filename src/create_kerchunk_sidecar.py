@@ -23,19 +23,23 @@ def _get_parser():
             prog=prog_name,
             description=description,
             formatter_class=argparse.RawDescriptionHelpFormatter)
-    parser.add_argument('dir',
-                        type=str,
-                        nargs=1,
-                        metavar='<directory>',
-                        help="Directory to scan and create kerchunk sidecar files")
-    parser.add_argument('output_location',
-                        type=str,
-                        nargs=1,
-                        metavar='<directory>',
-                        default='.',
-                        help="Directory to place sidecar files")
 
-    parser.add_argument('--extensions', '-ext',
+    # Global arguments
+    parser.add_argument('--directory', '-d',
+                        type=str,
+                        nargs=1,
+                        metavar='<directory>',
+                        required=True,
+                        help="Directory to scan and create kerchunk reference files")
+    parser.add_argument('--output_location', '-o',
+                        type=str,
+                        nargs=1,
+                        metavar='<directory>',
+                        required=False,
+                        default='.',
+                        help="Directory to place output files")
+
+    parser.add_argument('--extensions', '-e',
                         type=str,
                         required=False,
                         nargs='+',
@@ -43,11 +47,39 @@ def _get_parser():
                         help='Only process files of this extension',
                         default=[])
 
-    parser.add_argument('--dry_run',
+
+    parser.add_argument('--dry_run', '-dr',
                         action='store_true',
                         required=False,
                         help='Do a dry run of processing',
                         default=[])
+
+    # Mutually exclusive commands
+    actions_parser = parser.add_subparsers(title='Actions',
+            help='Use `tool [command] -h` for more info on command')
+    actions_parser.required = True
+    actions_parser.dest = 'Action'
+
+    # Actions
+    sidecar_parser = actions_parser.add_parser(
+            "sidecar",
+            #aliases=['sidecar', 'sc'],
+            help='Create sidecar files',
+            description='creates sidecar files')
+
+
+    combine_parser = actions_parser.add_parser(
+            "combine",
+            #aliases=['combine', 'cb'],
+            help='Combines references from files',
+            description='Combines references into a single file.')
+    combine_parser.add_argument('--regex', '-r',
+                        type=str,
+                        required=False,
+                        nargs=1,
+                        metavar='<regular expression>',
+                        help='Combine references that match')
+
 
     return parser
 
@@ -76,7 +108,9 @@ def main():
         sys.exit(1)
     args = parser.parse_args()
     print(args)
-    process_kerchunk(args.dir[0], args.output_location[0],
+    exit(1)
+    if typekk/
+    process_kerchunk(args.directory, args.output_location,
                      extensions=args.extensions,
                      dry_run=args.dry_run)
 
