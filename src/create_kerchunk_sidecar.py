@@ -108,9 +108,12 @@ def main():
         sys.exit(1)
     args = parser.parse_args()
     print(args)
-    exit(1)
-    if typekk/
-    process_kerchunk(args.directory, args.output_location,
+    if args.Action == 'sidecar':
+        process_kerchunk_sidecar(args.directory[0], args.output_location[0],
+                     extensions=args.extensions,
+                     dry_run=args.dry_run)
+    if args.Action == 'combine':
+        process_kerchunk_sidecar(args.directory[0], args.output_location[0],
                      extensions=args.extensions,
                      dry_run=args.dry_run)
 
@@ -129,7 +132,7 @@ def matches_extension(filename, extensions):
     return False
 
 
-def process_kerchunk(directory, output_directory='.', extensions=[], dry_run=False):
+def process_kerchunk_sidecar(directory, output_directory='.', extensions=[], dry_run=False):
     """Traverse files in `directory` and create kerchunk sidecar files."""
 
     try:
