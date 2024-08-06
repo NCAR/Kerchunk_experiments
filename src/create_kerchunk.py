@@ -24,13 +24,19 @@ def _get_parser():
             description=description,
             formatter_class=argparse.RawDescriptionHelpFormatter)
 
-    # Global arguments
+    parser.add_argument('--action', '-a',
+                        type=str,
+                        required=True,
+                        choices=['combine','sidecar'],
+                        nargs=1,
+                        metavar='<option>',
+                        help='Specify whether to create to combine references or create sidecar files.')
     parser.add_argument('--directory', '-d',
                         type=str,
                         nargs=1,
                         metavar='<directory>',
                         required=True,
-                        help="Directory to scan and create kerchunk reference files")
+                        help="Directory to scan and create kerchunk reference files.")
     parser.add_argument('--output_location', '-o',
                         type=str,
                         nargs=1,
@@ -54,32 +60,12 @@ def _get_parser():
                         help='Do a dry run of processing',
                         default=[])
 
-    # Mutually exclusive commands
-    actions_parser = parser.add_subparsers(title='Actions',
-            help='Use `tool [command] -h` for more info on command')
-    actions_parser.required = True
-    actions_parser.dest = 'Action'
-
-    # Actions
-    sidecar_parser = actions_parser.add_parser(
-            "sidecar",
-            #aliases=['sidecar', 'sc'],
-            help='Create sidecar files',
-            description='creates sidecar files')
-
-
-    combine_parser = actions_parser.add_parser(
-            "combine",
-            #aliases=['combine', 'cb'],
-            help='Combines references from files',
-            description='Combines references into a single file.')
-    combine_parser.add_argument('--regex', '-r',
+    parser.add_argument('--regex', '-r',
                         type=str,
                         required=False,
                         nargs=1,
                         metavar='<regular expression>',
                         help='Combine references that match')
-
 
     return parser
 
@@ -108,14 +94,17 @@ def main():
         sys.exit(1)
     args = parser.parse_args()
     print(args)
-    if args.Action == 'sidecar':
+    if args.action == 'sidecar':
         process_kerchunk_sidecar(args.directory[0], args.output_location[0],
                      extensions=args.extensions,
                      dry_run=args.dry_run)
-    if args.Action == 'combine':
-        process_kerchunk_sidecar(args.directory[0], args.output_location[0],
+    elif args.action == 'combine':
+        process_kerchunk_combine(args.directory[0], args.output_location[0],
                      extensions=args.extensions,
                      dry_run=args.dry_run)
+    else:
+        print(f'type "{args.action}" not recognized')
+        exit(1)
 
 
 def create_directories(dirs, base_path='./'):
@@ -164,6 +153,75 @@ def process_kerchunk_sidecar(directory, output_directory='.', extensions=[], dry
             os.chdir('..')
         else:
             create_directories(child_dirs)
+
+def find_files(directory, regex, extensions):
+    """Find matching files in directory."""
+    all_files = []
+    pattern = re.compile(regex)
+    for _dir in os.walk(directory):
+        cur_dir = _dir[0]
+        child_dirs = _dir[1]
+        files = _dir[2]
+        for _file in files:
+            full_path = os.path.join(cur_dir, _file)
+            if matches_extension(full_path, extensions) and pattern.match(full_path):
+                all_files.append(full_path)
+    return all_files
+
+def get_time_variable(ds):
+    """Get time Variable.
+    Will try different methods for finding lat in decreasing authority.
+    """
+
+    for k,v in ds.coords.items():
+        if 'standard_name' in v.attrs and v.attrs['standard_name'] == 'time':
+            return k
+        if 'standard_name' in v.attrs and v.attrs['standard_name'] == 'forecast_reference_time':
+            return k
+        if 'long_name' in v.attrs and v.attrs['long_name'] == 'time':
+            return k
+        if 'short_name' in v.attrs and v.attrs['short_name'] == 'time':
+            return k
+        if k.lower() == 'time':
+            return k
+        if 'units' in v.attrs and 'minutes since' in v.attrs['units']:
+            return k
+
+def process_kerchunk_combine(directory, output_directory='.', extensions=[], regex="", dry_run=False):
+    """Traverse files in `directory` and create kerchunk sidecar files."""
+
+    try:
+        os.stat(directory)
+    except FileNotFoundError:
+        print(f'Directory "{directory}" cannot be found')
+        sys.exit(1)
+
+    files = find_files(directory, regex, extensions)
+    print(files)
+    all_refs = []
+    for f in files:
+          print(f)
+          if not dry_run:
+              print(f'processing {f}')
+              ref = gen_json(f)
+              all_refs.append(ref)
+
+    print('combining')
+    mzz = MultiZarrToZarr(
+       all_refs,
+       concat_dims=["Time"],
+       #concat_dims=["time"],
+       #coo_map='QSNOW',
+    )
+    multi_kerchunk = mzz.translate()
+
+    # Write kerchunk .json record
+    guessed_filename =  os.path.join(output_directory, 'combined_kerchunk.json')
+    if regex:
+        guessed_filename = regex.replace('*','').replace('.','').replace('$','').replace('^','').replace('[','').replace(']','')
+    output_fname = os.path.join(output_directory, guessed_filename+'.json')
+    with open(f"{output_fname}", "wb") as f:
+        f.write(ujson.dumps(multi_kerchunk).encode())
 
 
 if __name__ == '__main__':
