@@ -72,11 +72,16 @@ def _get_parser():
                         Use the special keyword '{ALL_VARIABLES_KEYWORD}' to separate all into individual files.""",
                         default=[])
 
-
     parser.add_argument('--dry_run', '-dr',
                         action='store_true',
                         required=False,
                         help='Do a dry run of processing',
+                        default=[])
+
+    parser.add_argument('--make_remote', '-mr',
+                        action='store_true',
+                        required=False,
+                        help='Additionally make a remote accessible copy of json',
                         default=[])
 
     parser.add_argument('--regex', '-r',
@@ -109,7 +114,8 @@ def main():
                      extensions=args.extensions,
                      dry_run=args.dry_run,
                      variables=args.variables,
-                     output_filename=args.filename)
+                     output_filename=args.filename,
+                     make_remote=args.make_remote)
     else:
         print(f'type "{args.action}" not recognized')
         exit(1)
@@ -275,11 +281,14 @@ def separate_combine_write_all_vars(refs):
            #coo_map='QSNOW',
         )
     multi_kerchunk = mzz.translate()
-    write_kerchunk(output_directory, multi_kerchunk, regex, variables, output_filename)
+    write_kerchunk(output_directory, multi_kerchunk, regex, variables, output_filename, make_remote)
 
-def write_kerchunk(output_directory, multi_kerchunk, regex="", variable="", output_filename=""):
-    # Write kerchunk .json record
+def write_kerchunk(output_directory, multi_kerchunk, regex="", variable="", output_filename="", make_remote=False):
+    """Write kerchunk .json record"""
+
     if output_filename:
+        if output_filename[-5] != '.json':
+            output_filename = output_filename + '.json'
         output_fname = os.path.join(output_directory, output_filename)
     elif regex:
         guessed_filename = regex.replace('*','').replace('.','').replace('$','').replace('^','').replace('[','').replace(']','')
@@ -290,7 +299,12 @@ def write_kerchunk(output_directory, multi_kerchunk, regex="", variable="", outp
     with open(f"{output_fname}", "wb") as f:
         f.write(ujson.dumps(multi_kerchunk).encode())
 
-def process_kerchunk_combine(directory, output_directory='.', extensions=[], regex="", dry_run=False, variables=[], output_filename=""):
+    if make_remote:
+        import convert_ref_file_loc
+        convert_ref_file_loc.main(output_fname, output_fname.replace('.json','-remote.json')
+
+
+def process_kerchunk_combine(directory, output_directory='.', extensions=[], regex="", dry_run=False, variables=[], output_filename="", make_remote=False):
     """Traverse files in `directory` and create kerchunk sidecar files."""
 
     try:
