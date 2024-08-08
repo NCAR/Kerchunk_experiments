@@ -6,9 +6,10 @@ import pdb
 import argparse
 import re
 
+import dask
+import kerchunk.hdf
 from fsspec.implementations.local import LocalFileSystem
 from pathlib import Path
-import kerchunk.hdf
 from kerchunk.combine import MultiZarrToZarr
 
 
@@ -52,6 +53,16 @@ def _get_parser():
                         metavar='<extension>',
                         help='Only process files of this extension',
                         default=[])
+    parser.add_argument('--variables', '-v',
+                        type=str,
+                        required=False,
+                        nargs='+',
+                        metavar='<variable names>',
+                        help=f"""Only gather specific variables.
+                        Variable names are case sensitive.
+
+                        Use the special keyword {all_variables_keyword} to separate all into individual files.""",
+                        default=[])
 
 
     parser.add_argument('--dry_run', '-dr',
@@ -76,6 +87,7 @@ def gen_json(file_url, write_json=False):
     print(f'generating {file_url}')
     with fs.open(file_url, **so) as infile:
         h5chunks = kerchunk.hdf.SingleHdf5ToZarr(infile, file_url, inline_threshold=366 )
+
         year = file_url.split('/')[-1].split('.')[0]
         file_basename = os.path.basename(file_url)
         outfile = f'{file_basename}.json'
@@ -83,7 +95,26 @@ def gen_json(file_url, write_json=False):
             with fs.open(outfile, 'wb') as f:
                 print(f'writing {outfile}')
                 f.write(ujson.dumps(h5chunks.translate()).encode());
-        return h5chunks.translate()
+        json_struct = h5chunks.translate()
+
+        # for variables
+        keep_values = set(['.zgroup', '.zattrs','XTIME','XLON','XLAT'])
+    # * Time                    (Time) datetime64[ns] 1981-01-31T08:00:00
+    #XLAT                    (south_north, west_east) float32 ...
+    #XLONG                   (south_north, west_east) float32 ...
+    #XLAT_U                  (south_north, west_east_stag) float32 ...
+    #XLONG_U                 (south_north, west_east_stag) float32 ...
+    #XLAT_V                  (south_north_stag, west_east) float32 ...
+    #XLONG_V                 (south_north_stag, west_east) float32 ...
+    #XTIME
+        new_json = {}
+        for i in json_struct['refs']:
+            varname = i.split('/')[0]
+            if varname in keep_values or 'SWDOWN' == varname:
+                new_json[i] = json_struct['refs'][i]
+        json_struct['refs'] = new_json
+
+        return json_struct
 
 
 def main():
@@ -147,6 +178,7 @@ def process_kerchunk_sidecar(directory, output_directory='.', extensions=[], dry
            if matches_extension(f, extensions):
                print(f)
                if not dry_run:
+
                    gen_json(os.path.join(cur_dir,f), write_json=True)
 
         if len(child_dirs) == 0:
@@ -199,13 +231,15 @@ def process_kerchunk_combine(directory, output_directory='.', extensions=[], reg
     files = find_files(directory, regex, extensions)
     print(files)
     all_refs = []
+    lazy_results = []
+    #if dry_run:
     for f in files:
-          print(f)
-          if not dry_run:
-              print(f'processing {f}')
-              ref = gen_json(f)
-              all_refs.append(ref)
 
+        lazy_result = dask.delayed(gen_json)(f)
+        lazy_results.append(lazy_result)
+              #ref = gen_json(f)
+              #all_refs.append(ref)
+    all_refs = dask.compute(*lazy_results)
     print('combining')
     mzz = MultiZarrToZarr(
        all_refs,

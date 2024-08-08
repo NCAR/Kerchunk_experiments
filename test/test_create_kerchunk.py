@@ -17,7 +17,7 @@ def test_find_files():
     return create_kerchunk.find_files(path, regex, extensions)
 
 def test_combine():
-    create_kerchunk.process_kerchunk_combine(directory='/gpfs/csfs1/collections/rda/data/d559000/wy1981/198102/', output_directory='.', extensions=[], regex=r"^.*wrf2d.*-02.*$", dry_run=False)
+    create_kerchunk.process_kerchunk_combine(directory='/gpfs/csfs1/collections/rda/data/d559000/wy1981/198104/', output_directory='.', extensions=[], regex=r"^.*wrf2d.*-04-22.*$", dry_run=False)
 
 def test_create_mzz():
     path = '/gpfs/csfs1/collections/rda/data/d559000/wy1981/198102/wrf3d_d01_1981-02-27_0*'
