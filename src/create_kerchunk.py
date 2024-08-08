@@ -13,6 +13,8 @@ from pathlib import Path
 from kerchunk.combine import MultiZarrToZarr
 
 
+ALL_VARIABLES_KEYWORD = "ALL"
+
 def _get_parser():
     """Creates and returns parser object.
     Returns:
@@ -45,7 +47,13 @@ def _get_parser():
                         required=False,
                         default='.',
                         help="Directory to place output files")
-
+    parser.add_argument('--filename', '-f',
+                        type=str,
+                        nargs=1,
+                        metavar='<output filename>',
+                        required=False,
+                        default='',
+                        help="Filename for output json.")
     parser.add_argument('--extensions', '-e',
                         type=str,
                         required=False,
@@ -61,7 +69,7 @@ def _get_parser():
                         help=f"""Only gather specific variables.
                         Variable names are case sensitive.
 
-                        Use the special keyword {all_variables_keyword} to separate all into individual files.""",
+                        Use the special keyword '{ALL_VARIABLES_KEYWORD}' to separate all into individual files.""",
                         default=[])
 
 
@@ -83,39 +91,6 @@ def _get_parser():
 fs = LocalFileSystem()
 so = dict(mode='rb', anon=True, default_fill_cache=False, default_cache_type='first')
 
-def gen_json(file_url, write_json=False):
-    print(f'generating {file_url}')
-    with fs.open(file_url, **so) as infile:
-        h5chunks = kerchunk.hdf.SingleHdf5ToZarr(infile, file_url, inline_threshold=366 )
-
-        year = file_url.split('/')[-1].split('.')[0]
-        file_basename = os.path.basename(file_url)
-        outfile = f'{file_basename}.json'
-        if write_json:
-            with fs.open(outfile, 'wb') as f:
-                print(f'writing {outfile}')
-                f.write(ujson.dumps(h5chunks.translate()).encode());
-        json_struct = h5chunks.translate()
-
-        # for variables
-        keep_values = set(['.zgroup', '.zattrs','XTIME','XLON','XLAT'])
-    # * Time                    (Time) datetime64[ns] 1981-01-31T08:00:00
-    #XLAT                    (south_north, west_east) float32 ...
-    #XLONG                   (south_north, west_east) float32 ...
-    #XLAT_U                  (south_north, west_east_stag) float32 ...
-    #XLONG_U                 (south_north, west_east_stag) float32 ...
-    #XLAT_V                  (south_north_stag, west_east) float32 ...
-    #XLONG_V                 (south_north_stag, west_east) float32 ...
-    #XTIME
-        new_json = {}
-        for i in json_struct['refs']:
-            varname = i.split('/')[0]
-            if varname in keep_values or 'SWDOWN' == varname:
-                new_json[i] = json_struct['refs'][i]
-        json_struct['refs'] = new_json
-
-        return json_struct
-
 
 def main():
     """Entrypoint for command line application."""
@@ -132,10 +107,31 @@ def main():
     elif args.action == 'combine':
         process_kerchunk_combine(args.directory[0], args.output_location[0],
                      extensions=args.extensions,
-                     dry_run=args.dry_run)
+                     dry_run=args.dry_run,
+                     variables=args.variables,
+                     output_filename=args.filename)
     else:
         print(f'type "{args.action}" not recognized')
         exit(1)
+
+
+def gen_json(file_url, write_json=False):
+    print(f'generating {file_url}')
+    with fs.open(file_url, **so) as infile:
+        h5chunks = kerchunk.hdf.SingleHdf5ToZarr(infile, file_url, inline_threshold=366 )
+
+        year = file_url.split('/')[-1].split('.')[0]
+        file_basename = os.path.basename(file_url)
+        outfile = f'{file_basename}.json'
+        if write_json:
+            with fs.open(outfile, 'wb') as f:
+                print(f'writing {outfile}')
+                f.write(ujson.dumps(h5chunks.translate()).encode());
+        json_struct = h5chunks.translate()
+
+
+        return json_struct
+
 
 
 def create_directories(dirs, base_path='./'):
@@ -219,7 +215,82 @@ def get_time_variable(ds):
         if 'units' in v.attrs and 'minutes since' in v.attrs['units']:
             return k
 
-def process_kerchunk_combine(directory, output_directory='.', extensions=[], regex="", dry_run=False):
+def separate_vars(refs, var_names):
+    """Extracts specific variables from refs.
+    """
+    # for variables
+    keep_values = set(['.zgroup', '.zattrs',
+                       'Time',
+                       'XLAT',
+                       'XLONG',
+                       'XLAT_U',
+                       'XLONG_U',
+                       'XLAT_V',
+                       'XLONG_V',
+                       'XTIME',
+                       ])
+    keep_values.update(var_names)
+    updated_refs = []
+    for ref in refs:
+        new_json = {}
+        for i in ref['refs']:
+            varname = i.split('/')[0]
+            if varname in keep_values:
+                new_json[i] = ref['refs'][i]
+        ref['refs'] = new_json
+        updated_refs.append(ref)
+    return updated_refs
+
+def separate_combine_write_all_vars(refs):
+    """Extracts specific variables from refs.
+    """
+    import xarray
+    # for variables
+    keep_values = set(['.zgroup', '.zattrs',
+                       'Time',
+                       'XLAT',
+                       'XLONG',
+                       'XLAT_U',
+                       'XLONG_U',
+                       'XLAT_V',
+                       'XLONG_V',
+                       'XTIME',
+                       ])
+    keep_values.update(var_names)
+    updated_refs = []
+    for ref in refs:
+        new_json = {}
+        for i in ref['refs']:
+            varname = i.split('/')[0]
+            if varname in keep_values:
+                new_json[i] = ref['refs'][i]
+        ref['refs'] = new_json
+        updated_refs.append(ref)
+
+    print('combining')
+    mzz = MultiZarrToZarr(
+           all_refs,
+           concat_dims=["Time"],
+           #concat_dims=["time"],
+           #coo_map='QSNOW',
+        )
+    multi_kerchunk = mzz.translate()
+    write_kerchunk(output_directory, multi_kerchunk, regex, variables, output_filename)
+
+def write_kerchunk(output_directory, multi_kerchunk, regex="", variable="", output_filename=""):
+    # Write kerchunk .json record
+    if output_filename:
+        output_fname = os.path.join(output_directory, output_filename)
+    elif regex:
+        guessed_filename = regex.replace('*','').replace('.','').replace('$','').replace('^','').replace('[','').replace(']','')
+        output_fname = os.path.join(output_directory, guessed_filename)
+    else:
+        output_fname =  os.path.join(output_directory, 'combined_kerchunk.json')
+
+    with open(f"{output_fname}", "wb") as f:
+        f.write(ujson.dumps(multi_kerchunk).encode())
+
+def process_kerchunk_combine(directory, output_directory='.', extensions=[], regex="", dry_run=False, variables=[], output_filename=""):
     """Traverse files in `directory` and create kerchunk sidecar files."""
 
     try:
@@ -229,34 +300,30 @@ def process_kerchunk_combine(directory, output_directory='.', extensions=[], reg
         sys.exit(1)
 
     files = find_files(directory, regex, extensions)
-    print(files)
-    all_refs = []
     lazy_results = []
-    #if dry_run:
+    if dry_run:
+        print(f'processing {files}')
+        exit(1)
     for f in files:
-
         lazy_result = dask.delayed(gen_json)(f)
         lazy_results.append(lazy_result)
-              #ref = gen_json(f)
-              #all_refs.append(ref)
     all_refs = dask.compute(*lazy_results)
+
+    elif len(variables) == 1 and variables[0] == ALL_VARIABLES_KEYWORD:
+        separate_combine_write_all_vars()
+        exit(1)
+    elif len(variables) > 0:
+        all_refs = separate_vars(all_refs, variables)
+
     print('combining')
     mzz = MultiZarrToZarr(
-       all_refs,
-       concat_dims=["Time"],
-       #concat_dims=["time"],
-       #coo_map='QSNOW',
-    )
+           all_refs,
+           concat_dims=["Time"],
+           #concat_dims=["time"],
+           #coo_map='QSNOW',
+        )
     multi_kerchunk = mzz.translate()
-
-    # Write kerchunk .json record
-    guessed_filename =  os.path.join(output_directory, 'combined_kerchunk.json')
-    if regex:
-        guessed_filename = regex.replace('*','').replace('.','').replace('$','').replace('^','').replace('[','').replace(']','')
-    output_fname = os.path.join(output_directory, guessed_filename+'.json')
-    with open(f"{output_fname}", "wb") as f:
-        f.write(ujson.dumps(multi_kerchunk).encode())
-
+    write_kerchunk(output_directory, multi_kerchunk, regex, variables, output_filename)
 
 if __name__ == '__main__':
     main()
