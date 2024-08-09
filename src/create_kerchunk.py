@@ -32,7 +32,7 @@ def _get_parser():
                         required=True,
                         choices=['combine','sidecar'],
                         nargs=1,
-                        metavar='<option>',
+                        metavar='<combine|sidecar>',
                         help='Specify whether to create to combine references or create sidecar files.')
     parser.add_argument('--directory', '-d',
                         type=str,
@@ -301,7 +301,7 @@ def write_kerchunk(output_directory, multi_kerchunk, regex="", variable="", outp
 
     if make_remote:
         import convert_ref_file_loc
-        convert_ref_file_loc.main(output_fname, output_fname.replace('.json','-remote.json')
+        convert_ref_file_loc.main(output_fname, output_fname.replace('.json','-remote.json'))
 
 
 def process_kerchunk_combine(directory, output_directory='.', extensions=[], regex="", dry_run=False, variables=[], output_filename="", make_remote=False):
@@ -323,7 +323,7 @@ def process_kerchunk_combine(directory, output_directory='.', extensions=[], reg
         lazy_results.append(lazy_result)
     all_refs = dask.compute(*lazy_results)
 
-    elif len(variables) == 1 and variables[0] == ALL_VARIABLES_KEYWORD:
+    if len(variables) == 1 and variables[0] == ALL_VARIABLES_KEYWORD:
         separate_combine_write_all_vars()
         exit(1)
     elif len(variables) > 0:
