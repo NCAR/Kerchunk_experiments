@@ -31,25 +31,25 @@ def _get_parser():
                         type=str,
                         required=True,
                         choices=['combine','sidecar'],
-                        nargs=1,
+                        nargs=None,
                         metavar='<combine|sidecar>',
                         help='Specify whether to create to combine references or create sidecar files.')
     parser.add_argument('--directory', '-d',
                         type=str,
-                        nargs=1,
+                        nargs=None,
                         metavar='<directory>',
                         required=True,
                         help="Directory to scan and create kerchunk reference files.")
-    parser.add_argument('--output_location', '-o',
+    parser.add_argument('--output_directory', '-o',
                         type=str,
-                        nargs=1,
+                        nargs=None,
                         metavar='<directory>',
                         required=False,
                         default='.',
                         help="Directory to place output files")
     parser.add_argument('--filename', '-f',
                         type=str,
-                        nargs=1,
+                        nargs=None,
                         metavar='<output filename>',
                         required=False,
                         default='',
@@ -87,7 +87,7 @@ def _get_parser():
     parser.add_argument('--regex', '-r',
                         type=str,
                         required=False,
-                        nargs=1,
+                        nargs=None,
                         metavar='<regular expression>',
                         help='Combine references that match')
 
@@ -106,14 +106,15 @@ def main():
     args = parser.parse_args()
     print(args)
     if args.action == 'sidecar':
-        process_kerchunk_sidecar(args.directory[0], args.output_location[0],
+        process_kerchunk_sidecar(args.directory, args.output_directory,
                      extensions=args.extensions,
                      dry_run=args.dry_run)
     elif args.action == 'combine':
-        process_kerchunk_combine(args.directory[0], args.output_location[0],
+        process_kerchunk_combine(args.directory, args.output_directory,
                      extensions=args.extensions,
                      dry_run=args.dry_run,
                      variables=args.variables,
+                     regex=args.regex,
                      output_filename=args.filename,
                      make_remote=args.make_remote)
     else:
@@ -312,11 +313,11 @@ def process_kerchunk_combine(directory, output_directory='.', extensions=[], reg
     except FileNotFoundError:
         print(f'Directory "{directory}" cannot be found')
         sys.exit(1)
-
     files = find_files(directory, regex, extensions)
     lazy_results = []
     if dry_run:
         print(f'processing {files}')
+        print(f'{len(files)} files to process')
         exit(1)
     for f in files:
         lazy_result = dask.delayed(gen_json)(f)

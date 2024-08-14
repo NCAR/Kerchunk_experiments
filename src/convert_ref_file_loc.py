@@ -12,7 +12,7 @@ def main(filename, outfile):
         for l in fh:
             match = '\\/gpfs\\/csfs1\\/collections\\/rda\\/data'
                     #\\/gpfs\\/csfs1\\/collections\\/rda\\/data
-            #replacement = 'https:\\/\\/data.rda.ucar.edu'
+            replacement = 'https:\\/\\/data.rda.ucar.edu'
             replacement = 'https:\\/\\/osdf-director.osg-htc.org\\/ncar\\/rda'
             str_output =  l.replace(match, replacement)
             ofile.write(str_output)

@@ -43,6 +43,9 @@ def test_create_mzz():
     with open(f"{output_fname}", "wb") as f:
         f.write(ujson.dumps(multi_kerchunk).encode())
 
+def test_chunks():
+    filename = '/gpfs/csfs1/collections/rda/data/d559000/wy1981/198101/wrf2d_d01_1981-01-31_19:00:00.nc'
+
 #test_create_mzz()
 #files = test_find_files()
 #print(files)
