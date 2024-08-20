@@ -8,15 +8,18 @@ import pdb
 
 def main(filename, outfile):
     ofile = open(outfile, 'w')
+    osdf_filename = outfile.split('.json')[0]+'osdf.json'
+    osdf_ofile = open(osdf_filename, 'w')
     with open(filename) as fh:
         for l in fh:
             match = '\\/gpfs\\/csfs1\\/collections\\/rda\\/data'
-                    #\\/gpfs\\/csfs1\\/collections\\/rda\\/data
             replacement = 'https:\\/\\/data.rda.ucar.edu'
-            replacement = 'https:\\/\\/osdf-director.osg-htc.org\\/ncar\\/rda'
+            replacement_osdf = 'https:\\/\\/osdf-director.osg-htc.org\\/ncar\\/rda'
             str_output =  l.replace(match, replacement)
+            str_output_osdf =  l.replace(match, replacement_osdf)
             ofile.write(str_output)
-            print(l)
+            osdf_ofile.write(str_output_osdf)
+            #print(l)
 
 if __name__ == "__main__":
     if len(sys.argv) < 3:

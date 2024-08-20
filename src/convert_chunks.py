@@ -27,6 +27,7 @@ def convert_chunk(infile, outfile, chunksize, varname):
     else:
         chunksize = int(chunksize)
     ds = xarray.open_dataset(infile)
+    pdb.set_trace()
     new_ds = ds.chunk(chunksize)
     if varname:
         new_encoding = new_ds[varname].encoding

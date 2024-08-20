@@ -203,10 +203,12 @@ def find_files(directory, regex, extensions):
                 all_files.append(full_path)
     return all_files
 
-def get_time_variable(ds):
+def get_time_variable(filename):
     """Get time Variable.
     Will try different methods for finding lat in decreasing authority.
     """
+    import xarray
+    ds = xarray.open_dataset(filename)
 
     for k,v in ds.coords.items():
         if 'standard_name' in v.attrs and v.attrs['standard_name'] == 'time':
@@ -221,6 +223,7 @@ def get_time_variable(ds):
             return k
         if 'units' in v.attrs and 'minutes since' in v.attrs['units']:
             return k
+    return 'Time'
 
 def separate_vars(refs, var_names):
     """Extracts specific variables from refs.
@@ -248,7 +251,7 @@ def separate_vars(refs, var_names):
         updated_refs.append(ref)
     return updated_refs
 
-def separate_combine_write_all_vars(refs):
+def separate_combine_write_all_vars(refs, make_remote=False):
     """Extracts specific variables from refs.
     """
     import xarray
@@ -277,7 +280,7 @@ def separate_combine_write_all_vars(refs):
     print('combining')
     mzz = MultiZarrToZarr(
            all_refs,
-           concat_dims=["Time"],
+           concat_dims=["time"],
            #concat_dims=["time"],
            #coo_map='QSNOW',
         )
@@ -314,6 +317,7 @@ def process_kerchunk_combine(directory, output_directory='.', extensions=[], reg
         print(f'Directory "{directory}" cannot be found')
         sys.exit(1)
     files = find_files(directory, regex, extensions)
+    time_varname = get_time_variable(files[0])
     lazy_results = []
     if dry_run:
         print(f'processing {files}')
@@ -333,12 +337,12 @@ def process_kerchunk_combine(directory, output_directory='.', extensions=[], reg
     print('combining')
     mzz = MultiZarrToZarr(
            all_refs,
-           concat_dims=["Time"],
+           concat_dims=[time_varname],
            #concat_dims=["time"],
            #coo_map='QSNOW',
         )
     multi_kerchunk = mzz.translate()
-    write_kerchunk(output_directory, multi_kerchunk, regex, variables, output_filename)
+    write_kerchunk(output_directory, multi_kerchunk, regex, variables, output_filename, make_remote)
 
 if __name__ == '__main__':
     main()
