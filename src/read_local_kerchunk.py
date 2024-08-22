@@ -14,7 +14,7 @@ def read_local_ref(filename, *args):
     if args:
         start = datetime.datetime.now()
         print(start)
-        ds.isel(south_north=500, west_east=500).load()
+        #ds.isel(south_north=500, west_east=500).load()
         end = datetime.datetime.now()
         print(end-start)
 

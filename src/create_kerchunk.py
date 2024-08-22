@@ -317,6 +317,7 @@ def process_kerchunk_combine(directory, output_directory='.', extensions=[], reg
         print(f'Directory "{directory}" cannot be found')
         sys.exit(1)
     files = find_files(directory, regex, extensions)
+    print(f'Number of files: {len(files)}')
     time_varname = get_time_variable(files[0])
     lazy_results = []
     if dry_run:
