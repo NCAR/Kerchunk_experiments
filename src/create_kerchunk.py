@@ -5,6 +5,7 @@ import ujson
 import pdb
 import argparse
 import re
+import codecs
 
 import dask
 import kerchunk.hdf
@@ -85,13 +86,17 @@ def _get_parser():
                         default=[])
 
     parser.add_argument('--regex', '-r',
-                        type=str,
+                        type=unescaped_str,
                         required=False,
                         nargs=None,
                         metavar='<regular expression>',
                         help='Combine references that match')
 
     return parser
+
+
+def unescaped_str(arg_str):
+    return arg_str.replace("\\\\","\\")
 
 fs = LocalFileSystem()
 so = dict(mode='rb', anon=True, default_fill_cache=False, default_cache_type='first')
@@ -100,6 +105,7 @@ so = dict(mode='rb', anon=True, default_fill_cache=False, default_cache_type='fi
 def main():
     """Entrypoint for command line application."""
     parser = _get_parser()
+    print(sys.argv)
     if len(sys.argv) == 1:
         parser.print_help()
         sys.exit(1)
@@ -310,7 +316,6 @@ def write_kerchunk(output_directory, multi_kerchunk, regex="", variable="", outp
 
 def process_kerchunk_combine(directory, output_directory='.', extensions=[], regex="", dry_run=False, variables=[], output_filename="", make_remote=False):
     """Traverse files in `directory` and create kerchunk sidecar files."""
-
     try:
         os.stat(directory)
     except FileNotFoundError:
