@@ -54,9 +54,7 @@ def test_get_time_variable():
     filename = '/gpfs/csfs1/collections/rda/data/ds633.0/e5.oper.fc.sfc.accumu/196204/e5.oper.fc.sfc.accumu.128_144_sf.ll025sc.1962040106_1962041606.nc'
     assert create_kerchunk.get_time_variable(filename) == 'forecast_initial_time'
 
-#test_create_mzz()
-#files = test_find_files()
-#print(files)
-#test_combine()
-
+test_create_mzz()
+files = test_find_files()
+test_combine()
 test_get_time_variable()
