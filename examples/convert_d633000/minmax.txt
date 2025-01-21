@@ -1,0 +1,5 @@
+_10fg\. 10_metre_wind_gust
+_mx2t\. maximum_temperature_at_2_metres
+_mn2t\. minimum_temperature_at_2_metres
+_mxtpr\. maximum_total_precipitation_rate
+_mntpr\. minimum_total_precipitation_rate

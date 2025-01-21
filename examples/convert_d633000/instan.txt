@@ -1,0 +1,14 @@
+_zust\. friction_velocity
+_dndzn\. minimum_vertical_gradient_of_refractivity_inside_trapping_layer
+_dndza\. mean_vertical_gradient_of_refractivity_inside_trapping_layer
+_dctb\. duct_base_height
+_tplb\. trapping_layer_base_height
+_tplt\. trapping_layer_top_height
+_cbh\. cloud_base_height
+_deg01\. zero_degree_level
+_i10fg\. instantaneous_10_metre_wind_gust
+_ilspf\. instantaneous_large-scale_surface_precipitation_fraction
+_crr\. convective_rain_rate
+_lsrr\. large_scale_rain_rate
+_csfr\. convective_snowfall_rate_water_equivalent
+_lssfr\. large_scale_snowfall_rate_water_equivalent
