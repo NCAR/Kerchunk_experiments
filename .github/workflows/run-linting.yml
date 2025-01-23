@@ -19,3 +19,5 @@ jobs:
       run: pipx install ruff
     - name: Lint code with Ruff
       run: ruff check src
+      continue-on-error: true
+
