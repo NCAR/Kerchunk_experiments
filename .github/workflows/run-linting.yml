@@ -1,13 +1,24 @@
-steps:
-- uses: actions/checkout@v4
-- name: Set up Python
-  uses: actions/setup-python@v5
-  with:
-    python-version: '3.x'
-- name: Install the code linting and formatting tool Ruff
-  run: pipx install ruff
-- name: Lint code with Ruff
-  run: ruff check 
-  #- name: Check code formatting with Ruff
-  #run: ruff format --diff --target-version=py39
-  #continue-on-error: true
+name: Python package
+
+on: [push]
+
+jobs:
+  build:
+
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        python-version: [ "3.11", "3.12", "3.13"]
+    steps:
+    - uses: actions/checkout@v4
+    - name: Set up Python
+      uses: actions/setup-python@v5
+      with:
+        python-version: '3.x'
+    - name: Install the code linting and formatting tool Ruff
+      run: pipx install ruff
+    - name: Lint code with Ruff
+      run: ruff check 
+      #- name: Check code formatting with Ruff
+      #run: ruff format --diff --target-version=py39
+      #continue-on-error: true

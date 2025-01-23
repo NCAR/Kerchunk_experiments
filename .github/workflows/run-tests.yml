@@ -25,3 +25,7 @@ jobs:
       - run: |
           cd test
           python test_create_kerchunk.py
+      - name: Install the code linting and formatting tool Ruff
+          run: pipx install ruff
+      - name: Lint code with Ruff
+          run: ruff check src/generat
