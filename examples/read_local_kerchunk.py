@@ -11,15 +11,8 @@ def read_local_ref(filename, *args):
     m = fs.get_mapper('')
     ds = xarray.open_dataset(m, engine='zarr', backend_kwargs={'consolidated':False})
     print(ds)
-    if args:
-        start = datetime.datetime.now()
-        print(start)
-        #ds.isel(south_north=500, west_east=500).load()
-        end = datetime.datetime.now()
-        print(end-start)
 
     return ds
-
 
 if __name__ == '__main__':
     if len(sys.argv) == 1:
