@@ -8,13 +8,30 @@ import ujson
 sys.path.append('../src')
 import create_kerchunk
 from kerchunk.combine import MultiZarrToZarr
+import unittest
 
 
-def test_find_files():
-    regex = r'^.*19:.*$'
-    extensions = ['.nc']
-    path = '/glade/campaign/collections/rda/data/d559000/wy1981/198102/'
-    return create_kerchunk.find_files(path, regex, extensions)
+class TestCreateKerchunk(unittest.TestCase):
+    def test_find_files(self):
+        regex = r'^.*.2d.*3[0-1]_19:.*$' # 30th and 31st at 1900UTC
+        extensions = ['.nc']
+        path = '/glade/campaign/collections/rda/data/d559000/wy1981/198101/'
+        expected_output = ['/glade/campaign/collections/rda/data/d559000/wy1981/198101/wrf2d_d01_1981-01-30_19:00:00.nc',
+                           '/glade/campaign/collections/rda/data/d559000/wy1981/198101/wrf2d_d01_1981-01-31_19:00:00.nc']
+        files = create_kerchunk.find_files(path, regex, extensions)
+        self.assertEqual(files,expected_output)
+
+    def test_get_cluster(self):
+        client = create_kerchunk.get_cluster('pbs', num_processes=10)
+        print(client)
+        client = create_kerchunk.get_cluster('Not a cluster')
+        print(client)
+        client = create_kerchunk.get_cluster('local', num_processes=5)
+        print(client)
+        client = create_kerchunk.get_cluster('single', num_processes=5)
+        print(client)
+        client = create_kerchunk.get_cluster('k8s', num_processes=5)
+        print(client)
 
 def test_combine():
     create_kerchunk.process_kerchunk_combine(directory='/glade/campaign/collections/rda/data/d559000/wy1981/198101/', output_directory='.', extensions=[], regex=r"^.*wrf2d.*-01.*$", output_filename="T2_P_198101.json", variables=['T2','P'], dry_run=False)
@@ -43,6 +60,7 @@ def test_create_mzz():
         f.write(ujson.dumps(multi_kerchunk).encode())
     #os.remove(output_fname)
 
+
 def test_chunks():
     filename = '/gpfs/csfs1/collections/rda/data/d559000/wy1981/198101/wrf2d_d01_1981-01-31_19:00:00.nc'
 
@@ -59,3 +77,7 @@ def test_get_time_variable():
 #print(files)
 #test_combine()
 #test_get_time_variable()
+
+
+if __name__ == '__main':
+    unittest.main()

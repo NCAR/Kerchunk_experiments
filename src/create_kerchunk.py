@@ -13,7 +13,7 @@ from fsspec.implementations.local import LocalFileSystem
 from pathlib import Path
 from kerchunk.combine import MultiZarrToZarr
 from dask_jobqueue import PBSCluster
-from dask.distributed import Client
+from dask.distributed import Client, LocalCluster
 
 ALL_VARIABLES_KEYWORD = "ALL"
 
@@ -73,6 +73,19 @@ def _get_parser():
 
                         Use the special keyword '{ALL_VARIABLES_KEYWORD}' to separate all into individual files.""",
                         default=[])
+
+    parser.add_argument('--cluster', '-c',
+                        type=str,
+                        default="local",
+                        required=False,
+                        nargs=1,
+                        metavar='< PBS / single / local >',
+                        help=f"""Choose type of dask cluster to use.
+                        PBS - PBSCluster (defaults to 5 workers)
+                        single - singleThreaded
+                        local - localCluster (uses os.ncpus)
+                        """,
+                        )
 
     parser.add_argument('--dry_run', '-dr',
                         action='store_true',
@@ -161,6 +174,48 @@ def matches_extension(filename, extensions):
             return True
     return False
 
+def get_cluster(cluster, num_processes=5):
+    """Starts a cluster given option.
+
+    Args:
+        cluster (str): May be the following
+                       'PBS' - PBSCluster where 5 workers are used.
+                       'local' - LocalCluster where number of workers are os.ncpus().
+                       'single' - single threaded localCluster>
+                       'k8s' - KubeCluster
+        num_processes (int): Number of processes/workers to use. Default 0-use cluster default
+
+    Returns:
+        dask.distributed.Client - Client object
+    """
+    cluster = cluster.lower()
+    match cluster:
+        case "pbs":
+            cluster = PBSCluster(
+                job_name = 'dask-wk24-hpc',
+                cores = 1,
+                memory = '4GiB',
+                processes = 1,
+                account = 'P43713000',
+                local_directory = '/gpfs/csfs1/collections/rda/scratch/rpconroy/dask/spill',
+                log_directory = '/gpfs/csfs1/collections/rda/scratch/rpconroy/dask',
+                resource_spec = 'select=1:ncpus=1:mem=4GB',
+                queue = 'rda@casper-pbs',
+                walltime = '10:00:00',
+                interface = 'ext'
+                )
+            cluster.scale(jobs=num_processes)
+        case 'single':
+            cluster = LocalCluster(n_workers=1, threads_per_worker=1, processes=False)
+        case 'k8s':
+            from dask_kubernetes import KubeCluster
+            cluster = KubeCluster()
+            cluster.scale(jobs=num_processes)
+        case _: # default use localCluster
+            cluster = LocalCluster()
+
+
+    client = cluster.get_client()
 
 def process_kerchunk_sidecar(directory, output_directory='.', extensions=[], dry_run=False):
     """Traverse files in `directory` and create kerchunk sidecar files."""
@@ -295,7 +350,19 @@ def separate_combine_write_all_vars(refs, make_remote=False):
     write_kerchunk(output_directory, multi_kerchunk, regex, variables, output_filename, make_remote)
 
 def write_kerchunk(output_directory, multi_kerchunk, regex="", variable="", output_filename="", make_remote=False):
-    """Write kerchunk .json record"""
+    """Write kerchunk .json record
+
+    Args:
+        output_directory (str): Directory to  place json files.
+        multi_kerchunk (list): list of Kerchunk dicts.
+        regex (str): regex used to search over source files (used to guess output filename).
+        variable (str):
+        output_filename (str)
+        make_remote (bool)
+
+
+
+    """
 
     if output_filename:
         if output_filename[-5] != '.json':
