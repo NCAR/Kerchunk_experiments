@@ -1,3 +1,4 @@
+#!/usr/bin/env python
 import sys
 import os
 import json
@@ -21,10 +22,10 @@ def separate(filename):
 def reshuffle_vars(var_types):
     response = ''
     while response != 'done':
-        print('Coordinates:\n')
-        [print(x) for x in var_types['coords']]
-        print('Data Variables:\n')
-        [print(x) for x in var_types['data_vars']]
+        print('Coordinates:')
+        [print(f'\t{x}') for x in var_types['coords']]
+        print('Data Variables:')
+        [print(f'\t{x}') for x in var_types['data_vars']]
         print('Type a var to move')
         response = input().strip().strip('\n')
         print(f'"{response}"')
@@ -64,5 +65,5 @@ if __name__ == '__main__':
         print(f'Usage: {sys.argv[0]} [filename]')
         exit(1)
     filename = sys.argv[1]
-    separate(fileanme)
+    separate(filename)
 
