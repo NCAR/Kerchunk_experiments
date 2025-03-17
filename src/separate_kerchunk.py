@@ -26,10 +26,12 @@ def reshuffle_vars(var_types):
         [print(f'\t{x}') for x in var_types['coords']]
         print('Data Variables:')
         [print(f'\t{x}') for x in var_types['data_vars']]
-        print('Type a var to move')
+        print('Type a var to move OR inspect [var] OR done')
         response = input().strip().strip('\n')
         print(f'"{response}"')
         if response != 'done':
+            if response == 'inspect':
+                var_types['ds'].variables[response.split('inspect')[1]]
             if response in var_types['coords']:
                 var_types['data_vars'].add(response)
                 var_types['coords'].remove(response)
@@ -40,7 +42,6 @@ def reshuffle_vars(var_types):
                 print(f'{response} not a coord or data var. Try again or type "done"')
                 time.sleep(1)
     return var_types
-
 
 def get_var_types(filename):
     """Return variable names that are primary or coordinates.
