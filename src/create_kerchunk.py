@@ -428,7 +428,6 @@ def process_kerchunk_combine(directory, output_directory='.', extensions=[], reg
     mzz = MultiZarrToZarr(
            all_refs,
            concat_dims=[time_varname],
-           #concat_dims=["time"],
            #coo_map='QSNOW',
         )
     multi_kerchunk = mzz.translate()

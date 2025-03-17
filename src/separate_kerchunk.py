@@ -7,6 +7,7 @@ import time
 import dask
 import pdb
 import fsspec
+from kerchunk.combine import MultiZarrToZarr
 
 def separate(filename):
     refs = json.load(open(filename))
@@ -17,7 +18,31 @@ def separate(filename):
     for v in var_names:
         unique_vars.add(v.split('/')[0])
     var_types = get_var_types(filename)
-    reshuffle_vars(var_types)
+    var_types = reshuffle_vars(var_types)
+    new_refs = separate_primary_vars(var_types, refs)
+    write_refs(new_refs, filename)
+
+def write_refs(all_refs, filename):
+    """Take collection of refs and write new json"""
+    version = 1
+    for refname, refs in all_refs.items():
+        new_json = {'version':version}
+        new_json['refs'] = refs
+        fh = open(filename+'.'+refname+'.json', 'w')
+        json.dump(new_json, fh)
+        fh.close()
+
+
+def separate_primary_vars(var_types, refs):
+    """Separate out each variable into thier own reference file."""
+    all_refs = {}
+    for var_str in var_types['data_vars']:
+        all_refs[var_str] = {}
+        for ref in refs.keys():
+            if var_str in ref:
+                all_refs[var_str][ref] = refs[ref]
+    return all_refs
+
 
 def reshuffle_vars(var_types):
     response = ''
@@ -30,9 +55,10 @@ def reshuffle_vars(var_types):
         response = input().strip().strip('\n')
         print(f'"{response}"')
         if response != 'done':
-            if response == 'inspect':
-                var_types['ds'].variables[response.split('inspect')[1]]
-            if response in var_types['coords']:
+            if 'inspect' in response:
+                var = var_types['ds'].variables[response.split(' ')[1]]
+                print(var)
+            elif response in var_types['coords']:
                 var_types['data_vars'].add(response)
                 var_types['coords'].remove(response)
             elif response in var_types['data_vars']:
