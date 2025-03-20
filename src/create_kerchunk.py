@@ -365,7 +365,7 @@ def write_kerchunk(output_directory, multi_kerchunk, regex="", variable="", outp
     """
 
     if output_filename:
-        if output_filename[-5] != '.json':
+        if output_filename.strip()[-5:] != '.json':
             output_filename = output_filename + '.json'
         output_fname = os.path.join(output_directory, output_filename)
     elif regex:
