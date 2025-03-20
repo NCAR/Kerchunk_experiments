@@ -7,8 +7,9 @@ import pdb
 
 
 def main(filename, outfile):
-    ofile = open(outfile, 'w')
-    osdf_filename = outfile.split('.json')[0]+'osdf.json'
+    out_filename = outfile.split('.json')[0]+'-https.json'
+    ofile = open(out_filename, 'w')
+    osdf_filename = outfile.split('.json')[0]+'-osdf.json'
     osdf_ofile = open(osdf_filename, 'w')
     with open(filename) as fh:
         for l in fh:

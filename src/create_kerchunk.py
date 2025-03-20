@@ -413,10 +413,19 @@ def process_kerchunk_combine(directory, output_directory='.', extensions=[], reg
         print(f'processing {files}')
         print(f'{len(files)} files to process')
         exit(1)
+    all_refs = []
     for f in files:
         lazy_result = dask.delayed(gen_json)(f)
         lazy_results.append(lazy_result)
-    all_refs = dask.compute(*lazy_results)
+        # Split up large jobs
+        if len(lazy_results) > 5000:
+            print('Intermediate processing')
+            tmp_refs = dask.compute(*lazy_results)
+            all_refs.extend(tmp_refs)
+            lazy_results = []
+
+
+    all_refs.extend(dask.compute(*lazy_results))
 
     if len(variables) == 1 and variables[0] == ALL_VARIABLES_KEYWORD:
         separate_combine_write_all_vars()
