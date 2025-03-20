@@ -6,6 +6,7 @@ import pdb
 import argparse
 import re
 import codecs
+import time
 
 import dask
 import kerchunk.hdf
@@ -419,10 +420,13 @@ def process_kerchunk_combine(directory, output_directory='.', extensions=[], reg
         lazy_results.append(lazy_result)
         # Split up large jobs
         if len(lazy_results) > 5000:
-            print('Intermediate processing')
+            start = time.time()
+            print(f'Intermediate processing ({len(all_refs)}/{len(files)})')
             tmp_refs = dask.compute(*lazy_results)
             all_refs.extend(tmp_refs)
             lazy_results = []
+            end = time.time()
+            print(f'Done intermediate. Elapsed time ({end-start} seconds)')
 
 
     all_refs.extend(dask.compute(*lazy_results))
