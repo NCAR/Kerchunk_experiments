@@ -206,12 +206,15 @@ def get_cluster(cluster, num_processes=5):
                 interface = 'ext'
                 )
             cluster.scale(jobs=num_processes)
+            return Client(cluster)
         case 'single':
             cluster = LocalCluster(n_workers=1, threads_per_worker=1, processes=False)
         case 'k8s':
             from dask_kubernetes import KubeCluster
             cluster = KubeCluster()
             cluster.scale(jobs=num_processes)
+        case 'local':
+            cluster = LocalCluster()
         case _: # default use localCluster
             cluster = LocalCluster()
 
@@ -383,24 +386,26 @@ def write_kerchunk(output_directory, multi_kerchunk, regex="", variable="", outp
         convert_ref_file_loc.main(output_fname, output_fname.replace('.json','-remote.json'))
 
 
-def process_kerchunk_combine(directory, output_directory='.', extensions=[], regex="", dry_run=False, variables=[], output_filename="", make_remote=False):
+def process_kerchunk_combine(directory, output_directory='.', extensions=[], regex="", dry_run=False, variables=[],
+                             output_filename="", make_remote=False, cluster_str='local'):
     """Traverse files in `directory` and create kerchunk aggregated files."""
-    number_of_workers=5
-    cluster = PBSCluster(
-            job_name = 'dask-wk24-hpc',
-            cores = 1,
-            memory = '4GiB',
-            processes = 1,
-            account = 'P43713000',
-            local_directory = '/gpfs/csfs1/collections/rda/scratch/rpconroy/dask/spill',
-            log_directory = '/gpfs/csfs1/collections/rda/scratch/rpconroy/dask',
-            resource_spec = 'select=1:ncpus=1:mem=4GB',
-            queue = 'rda@casper-pbs',
-            walltime = '10:00:00',
-            interface = 'ext'
-        )
-    cluster.scale(jobs=number_of_workers)
-    client = Client(cluster)
+    client = get_cluster(cluster_str)
+    #number_of_workers=5
+    #cluster = PBSCluster(
+    #        job_name = 'dask-wk24-hpc',
+    #        cores = 1,
+    #        memory = '4GiB',
+    #        processes = 1,
+    #        account = 'P43713000',
+    #        local_directory = '/gpfs/csfs1/collections/rda/scratch/rpconroy/dask/spill',
+    #        log_directory = '/gpfs/csfs1/collections/rda/scratch/rpconroy/dask',
+    #        resource_spec = 'select=1:ncpus=1:mem=4GB',
+    #        queue = 'rda@casper-pbs',
+    #        walltime = '10:00:00',
+    #        interface = 'ext'
+    #    )
+    #cluster.scale(jobs=number_of_workers)
+    #client = Client(cluster)
     try:
         os.stat(directory)
     except FileNotFoundError:
