@@ -289,7 +289,7 @@ def get_time_variable(filename):
             return k
         if 'units' in v.attrs and 'minutes since' in v.attrs['units']:
             return k
-    return 'Time'
+    return 'time'
 
 def separate_vars(refs, var_names):
     """Extracts specific variables from refs.
