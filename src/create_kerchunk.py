@@ -1,6 +1,7 @@
 #!/usr/bin/env python
 
 import os, sys
+import json
 import ujson
 import pdb
 import argparse
@@ -16,7 +17,17 @@ from kerchunk.combine import MultiZarrToZarr
 from dask_jobqueue import PBSCluster
 from dask.distributed import Client, LocalCluster
 
+### Global settings
+
+# special keyword to indicate all variables should be separated
 ALL_VARIABLES_KEYWORD = "ALL"
+# global filesystem object
+fs = LocalFileSystem()
+# default fs.open(file, **so) arguments dictionary for writing kerchunk reference files
+so = dict(mode='rb', anon=True, default_fill_cache=False, default_cache_type='first')
+# initial global dask client
+_global_client = None
+
 
 def _get_parser():
     """Creates and returns parser object.
@@ -26,191 +37,159 @@ def _get_parser():
     description = "Creates kerchunk sidecar files of an entire directory structure."
     prog_name = sys.argv[0] if sys.argv[0] != '' else 'create_kerchunk_sidecar'
     parser = argparse.ArgumentParser(
-            prog=prog_name,
-            description=description,
-            formatter_class=argparse.RawDescriptionHelpFormatter)
+        prog=prog_name,
+        description=description,
+        formatter_class=argparse.RawDescriptionHelpFormatter
+    )
 
-    parser.add_argument('--action', '-a',
-                        type=str,
-                        required=True,
-                        choices=['combine','sidecar'],
-                        nargs=None,
-                        metavar='<combine|sidecar>',
-                        help='Specify whether to create to combine references or create sidecar files.')
-    parser.add_argument('--directory', '-d',
-                        type=str,
-                        nargs=None,
-                        metavar='<directory>',
-                        required=True,
-                        help="Directory to scan and create kerchunk reference files.")
-    parser.add_argument('--output_directory', '-o',
-                        type=str,
-                        nargs=None,
-                        metavar='<directory>',
-                        required=False,
-                        default='.',
-                        help="Directory to place output files")
-    parser.add_argument('--filename', '-f',
-                        type=str,
-                        nargs=None,
-                        metavar='<output filename>',
-                        required=False,
-                        default='',
-                        help="Filename for output json.")
-    parser.add_argument('--extensions', '-e',
-                        type=str,
-                        required=False,
-                        nargs='+',
-                        metavar='<extension>',
-                        help='Only process files of this extension',
-                        default=[])
-    parser.add_argument('--variables', '-v',
-                        type=str,
-                        required=False,
-                        nargs='+',
-                        metavar='<variable names>',
-                        help=f"""Only gather specific variables.
-                        Variable names are case sensitive.
+    parser.add_argument(
+        '--action', '-a',
+        type=str,
+        required=True,
+        choices=['combine','sidecar'],
+        nargs=None,
+        metavar='<combine|sidecar>',
+        help='Specify whether to create to combine references or create sidecar files.'
+    )
+    parser.add_argument(
+        '--directory', '-d',
+        type=str,
+        nargs=None,
+        metavar='<directory>',
+        required=True,
+        help="Directory to scan and create kerchunk reference files."
+    )
+    parser.add_argument(
+        '--output_directory', '-o',
+        type=str,
+        nargs=None,
+        metavar='<directory>',
+        required=False,
+        default='.',
+        help="Directory to place output files"
+    )
+    parser.add_argument(
+        '--filename', '-f',
+        type=str,
+        nargs=None,
+        metavar='<output filename>',
+        required=False,
+        default='',
+        help="Filename for output json."
+    )
+    parser.add_argument(
+        '--extensions', '-e',
+        type=str,
+        required=False,
+        nargs='+',
+        metavar='<extension>',
+        help='Only process files of this extension',
+        default=[]
+    )
+    parser.add_argument(
+        '--variables', '-v',
+        type=str,
+        required=False,
+        nargs='+',
+        metavar='<variable names>',
+        help=(
+        "Only gather specific variables.\n"+
+        "Variable names are case sensitive.\n"+
+        f"Use the special keyword '{ALL_VARIABLES_KEYWORD}' to separate all into individual files."
+        ),
+        default=[]
+    )
+    parser.add_argument(
+        '--cluster', '-c',
+        type=str,
+        default="local",
+        required=False,
+        nargs=1,
+        metavar='< PBS / single / local >',
+        help="""Choose type of dask cluster to use.
+        PBS - PBSCluster (defaults to 5 workers)
+        single - singleThreaded
+        local - localCluster (uses os.ncpus)
+        """
+    )
+    parser.add_argument(
+        '--dry_run', '-dr',
+        action='store_true',
+        required=False,
+        help='Do a dry run of processing',
+        default=[]
+    )
+    parser.add_argument(
+        '--make_remote', '-mr',
+        action='store_true',
+        required=False,
+        help='Additionally make a remote accessible copy of json',
+        default=[]
+    )
 
-                        Use the special keyword '{ALL_VARIABLES_KEYWORD}' to separate all into individual files.""",
-                        default=[])
+    def unescaped_str(arg_str):
+        """Remove escape characters from argument string."""
+        return arg_str.replace("\\\\","\\")
 
-    parser.add_argument('--cluster', '-c',
-                        type=str,
-                        default="local",
-                        required=False,
-                        nargs=1,
-                        metavar='< PBS / single / local >',
-                        help=f"""Choose type of dask cluster to use.
-                        PBS - PBSCluster (defaults to 5 workers)
-                        single - singleThreaded
-                        local - localCluster (uses os.ncpus)
-                        """,
-                        )
-
-    parser.add_argument('--dry_run', '-dr',
-                        action='store_true',
-                        required=False,
-                        help='Do a dry run of processing',
-                        default=[])
-
-    parser.add_argument('--make_remote', '-mr',
-                        action='store_true',
-                        required=False,
-                        help='Additionally make a remote accessible copy of json',
-                        default=[])
-
-    parser.add_argument('--regex', '-r',
-                        type=unescaped_str,
-                        required=False,
-                        nargs=None,
-                        metavar='<regular expression>',
-                        help='Combine references that match')
+    parser.add_argument(
+        '--regex', '-r',
+        type=unescaped_str,
+        required=False,
+        nargs=None,
+        metavar='<regular expression>',
+        help='Combine references that match'
+    )
 
     return parser
 
 
-def unescaped_str(arg_str):
-    return arg_str.replace("\\\\","\\")
-
-fs = LocalFileSystem()
-so = dict(mode='rb', anon=True, default_fill_cache=False, default_cache_type='first')
-
-
-def main():
-    """Entrypoint for command line application."""
-    parser = _get_parser()
-    print(sys.argv)
-    if len(sys.argv) == 1:
-        parser.print_help()
-        sys.exit(1)
-    args = parser.parse_args()
-    print(args)
-    if args.action == 'sidecar':
-        process_kerchunk_sidecar(args.directory, args.output_directory,
-                     extensions=args.extensions,
-                     dry_run=args.dry_run)
-    elif args.action == 'combine':
-        process_kerchunk_combine(args.directory, args.output_directory,
-                     extensions=args.extensions,
-                     dry_run=args.dry_run,
-                     variables=args.variables,
-                     regex=args.regex,
-                     output_filename=args.filename,
-                     make_remote=args.make_remote)
-    else:
-        print(f'type "{args.action}" not recognized')
-        exit(1)
-
-
-def gen_json(file_url, write_json=False):
-    print(f'generating {file_url}')
-    with fs.open(file_url, **so) as infile:
-        h5chunks = kerchunk.hdf.SingleHdf5ToZarr(infile, file_url, inline_threshold=366 )
-
-        year = file_url.split('/')[-1].split('.')[0]
-        file_basename = os.path.basename(file_url)
-        outfile = f'{file_basename}.json'
-        if write_json:
-            with fs.open(outfile, 'wb') as f:
-                print(f'writing {outfile}')
-                f.write(ujson.dumps(h5chunks.translate()).encode());
-        json_struct = h5chunks.translate()
-
-
-        return json_struct
-
-
-
-def create_directories(dirs, base_path='./'):
-    for i in dirs:
-        os.mkdir(os.path.join(base_path, i))
-
-
-def matches_extension(filename, extensions):
-    if len(extensions) == 0:
-        return True
-    for j in extensions:
-        if re.match(f'.*{j}$', filename):
-            return True
-    return False
-
-def get_cluster(cluster, num_processes=5):
-    """Starts a cluster given option.
+def get_cluster(
+    cluster_setting,
+    num_processes=5,
+    local_directory_pbs: str = None,
+    log_directory_pbs: str = None
+):
+    """Starts a cluster given option and create a global client
 
     Args:
         cluster (str): May be the following
-                       'PBS' - PBSCluster where 5 workers are used.
-                       'local' - LocalCluster where number of workers are os.ncpus().
-                       'single' - single threaded localCluster>
-                       'k8s' - KubeCluster
+            'PBS' - PBSCluster where 5 workers are used.
+            'local' - LocalCluster where number of workers are os.ncpus().
+            'single' - single threaded localCluster>
+            'k8s' - KubeCluster
         num_processes (int): Number of processes/workers to use. Default 0-use cluster default
 
     Returns:
-        dask.distributed.Client - Client object
+        dask.distributed.Client - Client object for all cluster types.
     """
-    cluster = cluster.lower()
-    match cluster:
+    global _global_client
+
+    cluster_setting = cluster_setting.lower()
+    match cluster_setting:
         case "pbs":
             cluster = PBSCluster(
-                job_name = 'dask-wk24-hpc',
+                job_name = 'gdex-kerchunk-hpc',
                 cores = 1,
                 memory = '4GiB',
                 processes = 1,
                 account = 'P43713000',
-                local_directory = '/gpfs/csfs1/collections/rda/scratch/rpconroy/dask/spill',
-                log_directory = '/gpfs/csfs1/collections/rda/scratch/rpconroy/dask',
+                local_directory = local_directory_pbs,
+                log_directory = log_directory_pbs,
                 resource_spec = 'select=1:ncpus=1:mem=4GB',
-                queue = 'rda@casper-pbs',
+                queue = 'gdex',
                 walltime = '10:00:00',
                 interface = 'ext'
-                )
+            )
             cluster.scale(jobs=num_processes)
-            return Client(cluster)
         case 'single':
             cluster = LocalCluster(n_workers=1, threads_per_worker=1, processes=False)
         case 'k8s':
-            from dask_kubernetes import KubeCluster
+            try :
+                # old version of dask_kubernetes
+                from dask_kubernetes import KubeCluster
+            except ImportError:
+                # new version of dask_kubernetes
+                from dask_kubernetes.operator import KubeCluster
             cluster = KubeCluster()
             cluster.scale(jobs=num_processes)
         case 'local':
@@ -218,11 +197,98 @@ def get_cluster(cluster, num_processes=5):
         case _: # default use localCluster
             cluster = LocalCluster()
 
+    if _global_client is None:
+        _global_client = cluster.get_client()
 
-    client = cluster.get_client()
+def cleanup_dask_client():
+    """Cleanup global dask client."""
+    global _global_client
+    if _global_client is not None:
+        _global_client.close()
+        _global_client = None
 
-def process_kerchunk_sidecar(directory, output_directory='.', extensions=[], dry_run=False):
+
+def gen_json(file_url, write_json=False):
+    """Generate kerchunk json structure for a single file.
+    
+    Parameters
+    -----------
+    file_url : str
+        path to file to generate kerchunk json structure for
+    write_json : bool
+        whether to write the json structure to a sidecar file
+
+    Returns
+    --------
+    json_struct : dict
+        kerchunk json structure
+
+    Notes
+    -----
+    - sidecar file will be named <file_url>.json
+    - the function also checks if the sidecar file already exists
+    - the function will write the sidecar file if it does not exist and
+      write_json is True
+
+    """
+    file_basename = os.path.basename(file_url)
+    outfile = f'{file_basename}.json'
+    print(f'generating {outfile}')
+
+    # skip build and just load and return existing json structure
+    # TODO: check read construct validity
+    if os.path.exists(outfile):
+        print(f'{outfile} exists, skipping')
+        with fs.open(outfile, 'rb') as f:
+            json_struct = ujson.loads(f.read().decode())
+        return json_struct
+
+    # build json structure if not exists
+    with fs.open(file_url, **so) as infile:
+        # set vlen_encode to 'leave' to avoid issues with string variable (d640000)
+        # set error to 'ignore' to skip over string decoding issues
+        # check https://fsspec.github.io/kerchunk/reference.html#kerchunk.hdf.SingleHdf5ToZarr
+        # for more details
+        h5chunks = kerchunk.hdf.SingleHdf5ToZarr(
+            infile,
+            file_url,
+            inline_threshold=366,
+            vlen_encode='leave',
+            error='ignore'
+        )
+        # year = file_url.split('/')[-1].split('.')[0]
+        if write_json:
+            with fs.open(outfile, 'wb') as f:
+                print(f'writing {outfile}')
+                f.write(ujson.dumps(h5chunks.translate()).encode())
+
+        json_struct = h5chunks.translate()
+
+    return json_struct
+
+def create_directories(dirs, base_path='./'):
+    """Create directories in dirs list if they do not exist."""
+    for i in dirs:
+        directory_path = os.path.join(base_path, i)
+        # create directory if it does not exist
+        if not os.path.exists(directory_path):
+            os.mkdir(directory_path)
+    return None
+
+def matches_extension(filename, extensions):
+    """Check if filename matches one of the extensions."""
+    if len(extensions) == 0:
+        return True
+    for j in extensions:
+        if re.match(f'.*{j}$', filename):
+            return True
+    return False
+
+def process_kerchunk_sidecar(directory, output_directory='.', extensions=None, dry_run=False):
     """Traverse files in `directory` and create kerchunk sidecar files."""
+
+    if extensions is None:
+        extensions = []
 
     try:
         os.stat(directory)
@@ -230,82 +296,111 @@ def process_kerchunk_sidecar(directory, output_directory='.', extensions=[], dry
         print(f'Directory "{directory}" cannot be found')
         sys.exit(1)
 
+    # change working directory to output directory
+    try:
+        os.stat(output_directory)
+    except FileNotFoundError:
+        print(f'Output directory "{output_directory}" cannot be found')
+        sys.exit(1)
     os.chdir(output_directory)
 
-    for _dir in os.walk(directory):
-        cur_dir = _dir[0]
-        child_dirs = _dir[1]
-        files = _dir[2]
+    for cur_dir, child_dirs, files in os.walk(directory):
+        # data file location information
         cur_dir_base = os.path.basename(os.path.normpath(cur_dir))
+
+        # check if reference file location has a subdirectory with the same name as
+        # the cur_dir_base at data file location
         try:
             os.stat(cur_dir_base)
             os.chdir(cur_dir_base)
         except FileNotFoundError:
             pass
 
+        # run reference generation for each file (if file matches extension and exists)
         for f in files:
-           if matches_extension(f, extensions):
-               print(f)
-               if not dry_run:
-
-                   gen_json(os.path.join(cur_dir,f), write_json=True)
+            if matches_extension(f, extensions):
+                # print file being processed
+                print(f)
+                # create json reference sidecar file
+                if not dry_run:
+                    gen_json(os.path.join(cur_dir,f), write_json=True)
 
         if len(child_dirs) == 0:
+            # if get to the end of the branch, go back up one level
             os.chdir('..')
         else:
+            # create child directories
             create_directories(child_dirs)
 
 def find_files(directory, regex, extensions):
     """Find matching files in directory."""
     all_files = []
-    pattern = re.compile(regex)
-    for _dir in os.walk(directory):
-        cur_dir = _dir[0]
-        child_dirs = _dir[1]
-        files = _dir[2]
-        for _file in files:
-            full_path = os.path.join(cur_dir, _file)
+    # Handle empty regex - match all files if regex is empty
+    if regex:
+        pattern = re.compile(regex)
+    else:
+        pattern = re.compile(".*")  # Match everything
+    
+    for cur_dir, _, files in os.walk(directory):
+        for file in files:
+            full_path = os.path.join(cur_dir, file)
             if matches_extension(full_path, extensions) and pattern.match(full_path):
                 all_files.append(full_path)
     return all_files
 
 def get_time_variable(filename):
-    """Get time Variable.
+    """Get time variable name in the file
     Will try different methods for finding lat in decreasing authority.
+
+    Parameters
+    ----------
+    filename : str
+        path to file to examine
+    
+    Returns
+    -------
+    time_varname : str or None
+        name of time variable if found, else None (need to check manually)
     """
     import xarray
     ds = xarray.open_dataset(filename)
 
-    for k,v in ds.coords.items():
-        if 'standard_name' in v.attrs and v.attrs['standard_name'] == 'time':
-            return k
-        if 'standard_name' in v.attrs and v.attrs['standard_name'] == 'forecast_reference_time':
-            return k
-        if 'long_name' in v.attrs and v.attrs['long_name'] == 'time':
-            return k
-        if 'short_name' in v.attrs and v.attrs['short_name'] == 'time':
-            return k
-        if k.lower() == 'time':
-            return k
-        if 'units' in v.attrs and 'minutes since' in v.attrs['units']:
-            return k
-    return 'time'
+    for key, value in ds.coords.items():
+        if 'standard_name' in value.attrs and value.attrs['standard_name'] == 'time':
+            return key
+        if 'standard_name' in value.attrs and value.attrs['standard_name'] == 'forecast_reference_time':
+            return key
+        if 'long_name' in value.attrs and value.attrs['long_name'] == 'time':
+            return key
+        if 'short_name' in value.attrs and value.attrs['short_name'] == 'time':
+            return key
+        if key.lower() == 'time':
+            return key
+        if 'units' in value.attrs and 'minutes since' in value.attrs['units']:
+            return key
+
+    return None
 
 def separate_vars(refs, var_names):
-    """Extracts specific variables from refs.
-    """
-    # for variables
-    keep_values = set(['.zgroup', '.zattrs',
-                       'Time',
-                       'XLAT',
-                       'XLONG',
-                       'XLAT_U',
-                       'XLONG_U',
-                       'XLAT_V',
-                       'XLONG_V',
-                       'XTIME',
-                       ])
+    """Extracts specific variables from reference files object."""
+    # preset keep variables
+    keep_values = set([
+        '.zgroup',
+        '.zattrs',
+        'Time',
+        'XLAT',
+        'XLONG',
+        'XLAT_U',
+        'XLONG_U',
+        'XLAT_V',
+        'XLONG_V',
+        'XTIME',
+    ])
+    # update keep variables with user specified variables in var_names
     keep_values.update(var_names)
+
+    # process each reference file object
+    # only keep variables in keep_values
     updated_refs = []
     for ref in refs:
         new_json = {}
@@ -317,55 +412,29 @@ def separate_vars(refs, var_names):
         updated_refs.append(ref)
     return updated_refs
 
-def separate_combine_write_all_vars(refs, make_remote=False):
-    """Extracts specific variables from refs.
-    """
-    import xarray
-    # for variables
-    keep_values = set(['.zgroup', '.zattrs',
-                       'Time',
-                       'XLAT',
-                       'XLONG',
-                       'XLAT_U',
-                       'XLONG_U',
-                       'XLAT_V',
-                       'XLONG_V',
-                       'XTIME',
-                       ])
-    keep_values.update(var_names)
-    updated_refs = []
-    for ref in refs:
-        new_json = {}
-        for i in ref['refs']:
-            varname = i.split('/')[0]
-            if varname in keep_values:
-                new_json[i] = ref['refs'][i]
-        ref['refs'] = new_json
-        updated_refs.append(ref)
+# def separate_combine_write_all_vars(refs, var_names, make_remote=False):
+#     """Extracts specific variables from refs.
+#     """
+#     updated_refs = separate_vars(refs, var_names)
 
-    print('combining')
-    mzz = MultiZarrToZarr(
-           all_refs,
-           concat_dims=["time"],
-           #concat_dims=["time"],
-           #coo_map='QSNOW',
-        )
-    multi_kerchunk = mzz.translate()
-    write_kerchunk(output_directory, multi_kerchunk, regex, variables, output_filename, make_remote)
+#     print('combining')
+#     mzz = MultiZarrToZarr(
+#            updated_refs,
+#            concat_dims=["time"],
+#            #coo_map='QSNOW',
+#         )
+#     multi_kerchunk = mzz.translate()
+#     write_kerchunk(output_directory, multi_kerchunk, regex, variables, output_filename, make_remote)
 
-def write_kerchunk(output_directory, multi_kerchunk, regex="", variable="", output_filename="", make_remote=False):
-    """Write kerchunk .json record
+def write_combined_kerchunk(output_directory, multi_kerchunk, regex=None, output_filename="", make_remote=False):
+    """Write kerchunk .json for combined kerchunk.
 
     Args:
         output_directory (str): Directory to  place json files.
         multi_kerchunk (list): list of Kerchunk dicts.
         regex (str): regex used to search over source files (used to guess output filename).
-        variable (str):
-        output_filename (str)
-        make_remote (bool)
-
-
-
+        output_filename (str): name of the output file.
+        make_remote (bool): whether to make the output file remote.
     """
 
     if output_filename:
@@ -386,34 +455,41 @@ def write_kerchunk(output_directory, multi_kerchunk, regex="", variable="", outp
         convert_ref_file_loc.main(output_fname, output_fname.replace('.json','-remote.json'))
 
 
-def process_kerchunk_combine(directory, output_directory='.', extensions=[], regex="", dry_run=False, variables=[],
-                             output_filename="", make_remote=False, cluster_str='local'):
+def process_kerchunk_combine(
+    directory,
+    output_directory='.',
+    extensions=None,
+    regex=None,
+    dry_run=False,
+    variables=None,
+    output_filename="",
+    make_remote=False
+):
     """Traverse files in `directory` and create kerchunk aggregated files."""
-    client = get_cluster(cluster_str)
-    #number_of_workers=5
-    #cluster = PBSCluster(
-    #        job_name = 'dask-wk24-hpc',
-    #        cores = 1,
-    #        memory = '4GiB',
-    #        processes = 1,
-    #        account = 'P43713000',
-    #        local_directory = '/gpfs/csfs1/collections/rda/scratch/rpconroy/dask/spill',
-    #        log_directory = '/gpfs/csfs1/collections/rda/scratch/rpconroy/dask',
-    #        resource_spec = 'select=1:ncpus=1:mem=4GB',
-    #        queue = 'rda@casper-pbs',
-    #        walltime = '10:00:00',
-    #        interface = 'ext'
-    #    )
-    #cluster.scale(jobs=number_of_workers)
-    #client = Client(cluster)
+
+    # set default arguments
+    if extensions is None:
+        extensions = []
+    if variables is None:
+        variables = []
+
+    # check if data directory exists
     try:
         os.stat(directory)
     except FileNotFoundError:
         print(f'Directory "{directory}" cannot be found')
         sys.exit(1)
+    
+    # find files to process
     files = find_files(directory, regex, extensions)
     print(f'Number of files: {len(files)}')
+
     time_varname = get_time_variable(files[0])
+    # check if time variable name is found
+    if time_varname is None:
+        print('Could not determine time variable name')
+        exit(1)
+    
     lazy_results = []
     if dry_run:
         print(f'processing {files}')
@@ -436,10 +512,10 @@ def process_kerchunk_combine(directory, output_directory='.', extensions=[], reg
 
     all_refs.extend(dask.compute(*lazy_results))
 
-    if len(variables) == 1 and variables[0] == ALL_VARIABLES_KEYWORD:
-        separate_combine_write_all_vars()
-        exit(1)
-    elif len(variables) > 0:
+    # if len(variables) == 1 and variables[0] == ALL_VARIABLES_KEYWORD:
+    #     separate_combine_write_all_vars(all_refs, variables, make_remote)
+    #     exit(1)
+    if len(variables) > 0:
         all_refs = separate_vars(all_refs, variables)
 
     print('combining')
@@ -449,7 +525,51 @@ def process_kerchunk_combine(directory, output_directory='.', extensions=[], reg
            #coo_map='QSNOW',
         )
     multi_kerchunk = mzz.translate()
-    write_kerchunk(output_directory, multi_kerchunk, regex, variables, output_filename, make_remote)
+    write_combined_kerchunk(output_directory, multi_kerchunk, regex, output_filename, make_remote)
+
+
+def main():
+    """Entrypoint for command line application."""
+    parser = _get_parser()
+    print(sys.argv)
+    if len(sys.argv) == 1:
+        parser.print_help()
+        sys.exit(1)
+    args = parser.parse_args()
+    print(args)
+
+    # initialize dask client
+    get_cluster(
+        cluster_setting = args.cluster,
+        num_processes=5,
+        local_directory_pbs=None,
+        log_directory_pbs=None
+    )
+
+    if args.action == 'sidecar':
+        process_kerchunk_sidecar(
+            args.directory,
+            args.output_directory,
+            extensions=args.extensions,
+            dry_run=args.dry_run
+        )
+    elif args.action == 'combine':
+        process_kerchunk_combine(
+            args.directory,
+            args.output_directory,
+            extensions=args.extensions,
+            dry_run=args.dry_run,
+            variables=args.variables,
+            regex=args.regex,
+            output_filename=args.filename,
+            make_remote=args.make_remote
+        )
+    else:
+        print(f'action type "{args.action}" not recognized')
+        exit(1)
+
+    # cleanup dask client
+    cleanup_dask_client()
 
 if __name__ == '__main__':
     main()
