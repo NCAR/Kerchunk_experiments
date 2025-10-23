@@ -1,26 +1,44 @@
 #!/usr/bin/env python
+"""
+Creates kerchunk sidecar files or combined kerchunk files for a directory structure.
+
+The script can be used to either create individual kerchunk sidecar files for each data file in a directory structure,
+or to create a combined kerchunk reference file that aggregates multiple data files.
+
+Parquet reference files is supported for combine action. 
+TODO: add sidecar support for Parquet files.
+
+Usage:
+    python create_kerchunk.py --action <combine|sidecar> --directory <data directory> [options]
+
+Test command:
+    python create_kerchunk.py --action sidecar --directory /path/to/data --output_directory /path/to/output
+    python create_kerchunk.py --action combine --directory /gdex/data/d640000/bnd_ocean/194907 --output_directory /glade/u/home/chiaweih/Kerchunk_experiments/test_json --extensions nc --filename combined_kerchunk.json --dry_run
+    python create_kerchunk.py --action combine --directory /gdex/data/d640000/bnd_ocean/194907 --output_directory /glade/u/home/chiaweih/Kerchunk_experiments/test_json --extensions nc --filename combined_kerchunk.json --cluster PBS
+"""
+
+# import codecs
+# import pdb
+# from pathlib import Path
 
 import os, sys
-import json
 import ujson
-import pdb
 import argparse
 import re
-import codecs
 import time
-
 import dask
-import kerchunk.hdf
-from fsspec.implementations.local import LocalFileSystem
-from pathlib import Path
-from kerchunk.combine import MultiZarrToZarr
 from dask_jobqueue import PBSCluster
-from dask.distributed import Client, LocalCluster
+from dask.distributed import LocalCluster
+from fsspec.implementations.local import LocalFileSystem
+import kerchunk.hdf
+from kerchunk.combine import MultiZarrToZarr
 
 ### Global settings
 
 # special keyword to indicate all variables should be separated
 ALL_VARIABLES_KEYWORD = "ALL"
+PBS_LOCAL_DIR = '/lustre/desc1/scratch/chiaweih/temp_dask'
+PBS_LOG_DIR = '/lustre/desc1/scratch/chiaweih/temp_pbs'
 # global filesystem object
 fs = LocalFileSystem()
 # default fs.open(file, **so) arguments dictionary for writing kerchunk reference files
@@ -140,6 +158,16 @@ def _get_parser():
         help='Combine references that match'
     )
 
+    parser.add_argument(
+        '--output_format', '-of',
+        type=str,
+        default="json",
+        required=False,
+        nargs=1,
+        metavar='< json / parquet >',
+        help='Specify the output format for the combined references.'
+    )
+
     return parser
 
 
@@ -208,15 +236,22 @@ def cleanup_dask_client():
         _global_client = None
 
 
-def gen_json(file_url, write_json=False):
+def gen_reference(file_url, output_format='json', write_reference=False):
     """Generate kerchunk json structure for a single file.
     
     Parameters
     -----------
     file_url : str
         path to file to generate kerchunk json structure for
+    output_format : str
+        output format for the generated kerchunk structure.
+        Default is 'json'. If 'parquet' is specified, the output will be in parquet format.
+ 
+    
     write_json : bool
-        whether to write the json structure to a sidecar file
+        whether to write the json structure to a sidecar file.
+        Default is False and returns the json structure without writing to file.
+        This is useful for dask delayed processing of multiple files combined later.
 
     Returns
     --------
@@ -232,16 +267,24 @@ def gen_json(file_url, write_json=False):
 
     """
     file_basename = os.path.basename(file_url)
-    outfile = f'{file_basename}.json'
-    print(f'generating {outfile}')
+
+    if output_format.lower() == 'parquet':
+        outfile = f'{file_basename}.parq'
+    elif output_format.lower() == 'json':
+        outfile = f'{file_basename}.json'
+    else:
+        print(f'output format "{output_format}" not recognized. Supported formats are "json" and "parquet".')
+        sys.exit(1)
+
+    print(f'generating {file_basename} references')
 
     # skip build and just load and return existing json structure
     # TODO: check read construct validity
     if os.path.exists(outfile):
         print(f'{outfile} exists, skipping')
         with fs.open(outfile, 'rb') as f:
-            json_struct = ujson.loads(f.read().decode())
-        return json_struct
+            reference_struct = ujson.loads(f.read().decode())
+        return reference_struct
 
     # build json structure if not exists
     with fs.open(file_url, **so) as infile:
@@ -257,14 +300,18 @@ def gen_json(file_url, write_json=False):
             error='ignore'
         )
         # year = file_url.split('/')[-1].split('.')[0]
-        if write_json:
+        if write_reference and output_format.lower() == 'json':
             with fs.open(outfile, 'wb') as f:
                 print(f'writing {outfile}')
                 f.write(ujson.dumps(h5chunks.translate()).encode())
+        elif write_reference and output_format.lower() == 'parquet':
+            from kerchunk import df
+            print(f'writing {outfile}')
+            df.refs_to_dataframe(h5chunks.translate(), outfile)
 
-        json_struct = h5chunks.translate()
+        reference_struct = h5chunks.translate()
 
-    return json_struct
+    return reference_struct
 
 def create_directories(dirs, base_path='./'):
     """Create directories in dirs list if they do not exist."""
@@ -284,7 +331,7 @@ def matches_extension(filename, extensions):
             return True
     return False
 
-def process_kerchunk_sidecar(directory, output_directory='.', extensions=None, dry_run=False):
+def process_kerchunk_sidecar(directory, output_directory='.', output_format='json', extensions=None, dry_run=False):
     """Traverse files in `directory` and create kerchunk sidecar files."""
 
     if extensions is None:
@@ -323,7 +370,7 @@ def process_kerchunk_sidecar(directory, output_directory='.', extensions=None, d
                 print(f)
                 # create json reference sidecar file
                 if not dry_run:
-                    gen_json(os.path.join(cur_dir,f), write_json=True)
+                    gen_reference(os.path.join(cur_dir,f), output_format=output_format, write_reference=True)
 
         if len(child_dirs) == 0:
             # if get to the end of the branch, go back up one level
@@ -333,14 +380,14 @@ def process_kerchunk_sidecar(directory, output_directory='.', extensions=None, d
             create_directories(child_dirs)
 
 def find_files(directory, regex, extensions):
-    """Find matching files in directory."""
+    """Traverse in the directory to find files."""
     all_files = []
     # Handle empty regex - match all files if regex is empty
     if regex:
         pattern = re.compile(regex)
     else:
         pattern = re.compile(".*")  # Match everything
-    
+
     for cur_dir, _, files in os.walk(directory):
         for file in files:
             full_path = os.path.join(cur_dir, file)
@@ -426,7 +473,7 @@ def separate_vars(refs, var_names):
 #     multi_kerchunk = mzz.translate()
 #     write_kerchunk(output_directory, multi_kerchunk, regex, variables, output_filename, make_remote)
 
-def write_combined_kerchunk(output_directory, multi_kerchunk, regex=None, output_filename="", make_remote=False):
+def write_combined_kerchunk(output_directory, multi_kerchunk, regex=None, output_filename="",output_format="json", make_remote=False):
     """Write kerchunk .json for combined kerchunk.
 
     Args:
@@ -436,23 +483,48 @@ def write_combined_kerchunk(output_directory, multi_kerchunk, regex=None, output
         output_filename (str): name of the output file.
         make_remote (bool): whether to make the output file remote.
     """
+    # determine file extension based on output format
+    if output_format.lower() == 'json':
+        file_extension = '.json'
+    elif output_format.lower() == 'parquet':
+        file_extension = '.parq'
+    else:
+        print(f'output format "{output_format}" not recognized. Supported formats are "json" and "parquet".')
+        sys.exit(1)
 
+    # define output filename
     if output_filename:
-        if output_filename.strip()[-5:] != '.json':
-            output_filename = output_filename + '.json'
+        # check if output filename ends with the correct file extension
+        if output_filename.strip()[-len(file_extension):] != file_extension:
+            output_filename = output_filename + file_extension
         output_fname = os.path.join(output_directory, output_filename)
     elif regex:
         guessed_filename = regex.replace('*','').replace('.','').replace('$','').replace('^','').replace('[','').replace(']','')
         output_fname = os.path.join(output_directory, guessed_filename)
     else:
-        output_fname =  os.path.join(output_directory, 'combined_kerchunk.json')
+        output_fname =  os.path.join(output_directory, f'combined_kerchunk{file_extension}')
 
-    with open(f"{output_fname}", "wb") as f:
-        f.write(ujson.dumps(multi_kerchunk).encode())
+    # write output file
+    if output_format.lower() == 'json':
+        with open(f"{output_fname}", "wb") as f:
+            f.write(ujson.dumps(multi_kerchunk).encode())
+        
+        print(f'Created: {output_fname}')
 
-    if make_remote:
-        import convert_ref_file_loc
-        convert_ref_file_loc.main(output_fname, output_fname.replace('.json','-remote.json'))
+        if make_remote:
+            import convert_ref_file_loc
+            convert_ref_file_loc.main(output_fname, output_fname.replace(file_extension,f'-remote{file_extension}'))
+
+
+    elif output_format.lower() == 'parquet':
+        from kerchunk import df
+        df.refs_to_dataframe(multi_kerchunk, output_fname)
+
+        print(f'Created: {output_fname}')
+
+        if make_remote:
+            import convert_ref_file_loc
+            convert_ref_file_loc.main_parquet(output_fname, output_fname.replace(file_extension,f'-remote{file_extension}'))
 
 
 def process_kerchunk_combine(
@@ -463,7 +535,8 @@ def process_kerchunk_combine(
     dry_run=False,
     variables=None,
     output_filename="",
-    make_remote=False
+    make_remote=False,
+    output_format="json"
 ):
     """Traverse files in `directory` and create kerchunk aggregated files."""
 
@@ -477,9 +550,9 @@ def process_kerchunk_combine(
     try:
         os.stat(directory)
     except FileNotFoundError:
-        print(f'Directory "{directory}" cannot be found')
+        print(f'Data directory "{directory}" cannot be found')
         sys.exit(1)
-    
+
     # find files to process
     files = find_files(directory, regex, extensions)
     print(f'Number of files: {len(files)}')
@@ -488,16 +561,18 @@ def process_kerchunk_combine(
     # check if time variable name is found
     if time_varname is None:
         print('Could not determine time variable name')
-        exit(1)
-    
+        sys.exit(1)
+
+    # dask delayed processing
     lazy_results = []
     if dry_run:
         print(f'processing {files}')
         print(f'{len(files)} files to process')
-        exit(1)
+        sys.exit(1)
+
     all_refs = []
     for f in files:
-        lazy_result = dask.delayed(gen_json)(f)
+        lazy_result = dask.delayed(gen_reference)(f, output_format=output_format, write_reference=False)
         lazy_results.append(lazy_result)
         # Split up large jobs
         if len(lazy_results) > 5000:
@@ -509,12 +584,11 @@ def process_kerchunk_combine(
             end = time.time()
             print(f'Done intermediate. Elapsed time ({end-start} seconds)')
 
-
     all_refs.extend(dask.compute(*lazy_results))
 
     # if len(variables) == 1 and variables[0] == ALL_VARIABLES_KEYWORD:
     #     separate_combine_write_all_vars(all_refs, variables, make_remote)
-    #     exit(1)
+    #     sys.exit(1)
     if len(variables) > 0:
         all_refs = separate_vars(all_refs, variables)
 
@@ -525,7 +599,15 @@ def process_kerchunk_combine(
            #coo_map='QSNOW',
         )
     multi_kerchunk = mzz.translate()
-    write_combined_kerchunk(output_directory, multi_kerchunk, regex, output_filename, make_remote)
+
+    write_combined_kerchunk(
+        output_directory,
+        multi_kerchunk,
+        regex,
+        output_filename,
+        output_format,
+        make_remote
+    )
 
 
 def main():
@@ -540,10 +622,10 @@ def main():
 
     # initialize dask client
     get_cluster(
-        cluster_setting = args.cluster,
-        num_processes=5,
-        local_directory_pbs=None,
-        log_directory_pbs=None
+        cluster_setting = args.cluster[0],
+        num_processes=4,
+        local_directory_pbs=PBS_LOCAL_DIR,
+        log_directory_pbs=PBS_LOG_DIR
     )
 
     if args.action == 'sidecar':
@@ -562,11 +644,12 @@ def main():
             variables=args.variables,
             regex=args.regex,
             output_filename=args.filename,
-            make_remote=args.make_remote
+            make_remote=args.make_remote,
+            output_format=args.output_format
         )
     else:
         print(f'action type "{args.action}" not recognized')
-        exit(1)
+        sys.exit(1)
 
     # cleanup dask client
     cleanup_dask_client()
