@@ -6,7 +6,6 @@ The script can be used to either create individual kerchunk sidecar files for ea
 or to create a combined kerchunk reference file that aggregates multiple data files.
 
 Parquet reference files is supported for combine action. 
-TODO: add sidecar support for Parquet files.
 
 Usage:
     python create_kerchunk.py --action <combine|sidecar> --directory <data directory> [options]
@@ -14,7 +13,8 @@ Usage:
 Test command:
     python create_kerchunk.py --action sidecar --directory /path/to/data --output_directory /path/to/output
     python create_kerchunk.py --action combine --directory /gdex/data/d640000/bnd_ocean/194907 --output_directory /glade/u/home/chiaweih/Kerchunk_experiments/test_json --extensions nc --filename combined_kerchunk.json --dry_run
-    python create_kerchunk.py --action combine --directory /gdex/data/d640000/bnd_ocean/194907 --output_directory /glade/u/home/chiaweih/Kerchunk_experiments/test_json --extensions nc --filename combined_kerchunk.json --cluster PBS
+    python create_kerchunk.py --action combine --directory /gdex/data/d640000/bnd_ocean/194907 --output_directory /glade/u/home/chiaweih/Kerchunk_experiments/test_json --extensions nc --filename combined_kerchunk.json 
+    python create_kerchunk.py --action combine --directory /glade/campaign/collections/gdex/data/d640000/bnd_ocean/194907 --output_directory /glade/u/home/chiaweih/Kerchunk_experiments/test_json --extensions nc --filename bnd_ocean.194907.parq --output_format parquet --make_remote
 """
 
 # import codecs
@@ -515,7 +515,6 @@ def write_combined_kerchunk(output_directory, multi_kerchunk, regex=None, output
             import convert_ref_file_loc
             convert_ref_file_loc.main(output_fname, output_fname.replace(file_extension,f'-remote{file_extension}'))
 
-
     elif output_format.lower() == 'parquet':
         from kerchunk import df
         df.refs_to_dataframe(multi_kerchunk, output_fname)
@@ -524,7 +523,7 @@ def write_combined_kerchunk(output_directory, multi_kerchunk, regex=None, output
 
         if make_remote:
             import convert_ref_file_loc
-            convert_ref_file_loc.main_parquet(output_fname, output_fname.replace(file_extension,f'-remote{file_extension}'))
+            convert_ref_file_loc.main_parquet(multi_kerchunk, output_fname.replace(file_extension,f'-remote{file_extension}'))
 
 
 def process_kerchunk_combine(
@@ -645,7 +644,7 @@ def main():
             regex=args.regex,
             output_filename=args.filename,
             make_remote=args.make_remote,
-            output_format=args.output_format
+            output_format=args.output_format[0]
         )
     else:
         print(f'action type "{args.action}" not recognized')

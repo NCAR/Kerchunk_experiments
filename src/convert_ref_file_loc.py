@@ -1,5 +1,7 @@
 #!/usr/bin/env python
 import sys
+import copy
+from kerchunk import df
 # import os
 # import re
 # import pdb
@@ -54,8 +56,8 @@ def main(filename, outfile):
     print(f'Created: {out_filename}')
     print(f'Created: {osdf_filename}')
 
-def main_parquet(filename, outfile):
-    """ Convert local file path to remote https file path in parquet files
+def main_parquet(dict_reference, outfile):
+    """ Convert local file path to remote https file path in reference dictionary
     There are two remote paths:
     1. https://data.gdex.ucar.edu
     2. https://osdf-director.osg-htc.org/ncar/gdex
@@ -67,55 +69,43 @@ def main_parquet(filename, outfile):
 
     Parameters
     ----------
-    filename : str
-        Input local parquet reference file name
+    dict_reference : dict
+        Input local parquet reference dictionary
     outfile : str
         Output remote parquet reference file name. 
 
     """
-    import pandas as pd
-
-    # Read the parquet file
-    df = pd.read_parquet(filename)
 
     # Define path patterns for replacement
     match = '/glade/campaign/collections/gdex/data'
     replacement = 'https://data.gdex.ucar.edu'
     replacement_osdf = 'https://osdf-director.osg-htc.org/ncar/gdex'
 
-    # Create copies of the dataframe for modifications
-    df_https = df.copy()
-    df_osdf = df.copy()
+    # hard copy the dict_reference to modify
+    dict_reference_https = copy.deepcopy(dict_reference)
+    dict_reference_osdf = copy.deepcopy(dict_reference)
 
-    # Replace paths in all string columns
-    #  Parquet files have 4 Columns: ['path', 'offset', 'size', 'raw']
-    #  We modify the 'path' column which is of string type
-
-    # check path column exist
-    if 'path' not in df.columns:
-        print(f'Column "path" not found in the parquet file.')
-        sys.exit(1)
-    if df['path'].dtype != 'object':  # String column
-        print(f'Column "path" is not of string type in the parquet file.')
-        sys.exit(1)
-
-    # replace local reference to remote reference
-    column = 'path'
-    df_https[column] = df_https[column].astype(str).str.replace(match, replacement, regex=False)
-    df_osdf[column] = df_osdf[column].astype(str).str.replace(match, replacement_osdf, regex=False)
+    # Create a DataFrame from the dictionary
+    for chunk_name, chunk_value in dict_reference['refs'].items():
+        if isinstance(chunk_value, list):
+            # first element is path string
+            dict_reference_https['refs'][chunk_name][0] = chunk_value[0].replace(match, replacement)
+            dict_reference_osdf['refs'][chunk_name][0] = chunk_value[0].replace(match, replacement_osdf)
 
     # Generate output filenames
-    base_name = outfile.split('.parq')[0] if outfile.endswith('.parq') else outfile
+    if outfile.endswith('.parq'):
+        base_name = outfile.split('.parq')[0]
+    else:
+        base_name = outfile
     out_filename_https = base_name + '-https.parq'
     out_filename_osdf = base_name + '-osdf.parq'
 
     # Write the modified dataframes to parquet files
-    df_https.to_parquet(out_filename_https, index=False)
-    df_osdf.to_parquet(out_filename_osdf, index=False)
+    df.refs_to_dataframe(dict_reference_https, out_filename_https)
+    df.refs_to_dataframe(dict_reference_osdf, out_filename_osdf)
 
     print(f'Created: {out_filename_https}')
     print(f'Created: {out_filename_osdf}')
-
 
 if __name__ == "__main__":
     # test if arguments are provided
@@ -123,16 +113,10 @@ if __name__ == "__main__":
         print('Convert local file to remote file location')
         print('For JSON files:')
         print(f'  usage: {sys.argv[0]} [filename.json] [outfile.json]')
-        print('For Parquet files:')
-        print(f'  usage: {sys.argv[0]} [filename.parquet] [outfile.parquet]')
         sys.exit(1)
 
     filename = sys.argv[1]
     outfile = sys.argv[2]
 
-    # Determine file type and call appropriate function
-    if filename.lower().endswith('.parquet'):
-        main_parquet(filename, outfile)
-    else:
-        # Default to JSON processing for backwards compatibility
-        main(filename, outfile)
+    # Default to JSON processing for backwards compatibility
+    main(filename, outfile)
