@@ -15,6 +15,7 @@ Test command:
     python create_kerchunk.py --action combine --directory /gdex/data/d640000/bnd_ocean/194907 --output_directory /glade/u/home/chiaweih/Kerchunk_experiments/test_json --extensions nc --filename combined_kerchunk.json --dry_run
     python create_kerchunk.py --action combine --directory /gdex/data/d640000/bnd_ocean/194907 --output_directory /glade/u/home/chiaweih/Kerchunk_experiments/test_json --extensions nc --filename combined_kerchunk.json 
     python create_kerchunk.py --action combine --directory /glade/campaign/collections/gdex/data/d640000/bnd_ocean/194907 --output_directory /glade/u/home/chiaweih/Kerchunk_experiments/test_json --extensions nc --filename bnd_ocean.194907.parq --output_format parquet --make_remote
+    
 """
 
 # import codecs
@@ -205,7 +206,7 @@ def get_cluster(
                 log_directory = log_directory_pbs,
                 resource_spec = 'select=1:ncpus=1:mem=4GB',
                 queue = 'gdex',
-                walltime = '10:00:00',
+                walltime = '24:00:00',
                 interface = 'ext'
             )
             cluster.scale(jobs=num_processes)
@@ -392,6 +393,7 @@ def find_files(directory, regex, extensions):
         for file in files:
             full_path = os.path.join(cur_dir, file)
             if matches_extension(full_path, extensions) and pattern.match(full_path):
+                full_path = os.path.normpath(full_path)
                 all_files.append(full_path)
     return all_files
 
@@ -554,6 +556,7 @@ def process_kerchunk_combine(
 
     # find files to process
     files = find_files(directory, regex, extensions)
+    files = sorted(files)
     print(f'Number of files: {len(files)}')
 
     time_varname = get_time_variable(files[0])
@@ -622,7 +625,7 @@ def main():
     # initialize dask client
     get_cluster(
         cluster_setting = args.cluster[0],
-        num_processes=4,
+        num_processes=8,
         local_directory_pbs=PBS_LOCAL_DIR,
         log_directory_pbs=PBS_LOG_DIR
     )
